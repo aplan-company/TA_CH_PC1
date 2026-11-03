@@ -1,0 +1,1 @@
+{ "name": "ta-ch-pc1", "private": true, "description": "SANTA'S DELIVERY relay (MadSync split screen)", "dependencies": { "ws": "^8.18.0" } }

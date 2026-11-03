@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="UTF-8"><title>SANTA 분할 화면 — 한 PC 테스트</title>
+<style>
+body{margin:0;background:#111;color:#ddd;font:13px/1.5 -apple-system,system-ui,sans-serif}
+header{display:flex;gap:8px;align-items:center;padding:10px 14px;background:#1a1a1a;border-bottom:1px solid #333;flex-wrap:wrap}
+header b{color:#fff}button{background:#2a2a2a;color:#eee;border:1px solid #444;border-radius:6px;padding:6px 12px;cursor:pointer}button:hover{background:#333}
+input[type=text]{background:#0b0b0b;color:#eee;border:1px solid #444;border-radius:6px;padding:6px 10px;width:220px}
+#wall{display:flex;margin:14px;gap:0;align-items:flex-start}#wall.gap{gap:14px}
+.scr{position:relative}.scr iframe{border:0;display:block;background:#000}.scr span{position:absolute;left:6px;bottom:-20px;color:#888;font-size:11px}
+#bottom{display:flex;gap:20px;margin:34px 14px 14px;align-items:flex-start}
+#phone{width:360px;height:700px;border:10px solid #222;border-radius:30px;overflow:hidden;flex:none;background:#000}#phone iframe{width:100%;height:100%;border:0}
+#log{flex:1;background:#0b0b0b;border:1px solid #333;border-radius:8px;padding:10px;height:680px;overflow:auto;font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap}
+.st{display:inline-block;padding:2px 10px;border-radius:999px;background:#333}.st.playing{background:#1d6b3a}.st.idle{background:#555}
+.sep{width:1px;height:22px;background:#333;margin:0 4px}
+</style></head><body>
+<header><b>SANTA 분할 화면 테스트</b> room <code id="room"></code>
+ <span>게임 상태 <span class="st" id="st">-</span> 배달 <b id="cnt">0</b></span><span class="sep"></span>
+ <input type="text" id="txt" placeholder="소원 문장 (비우면 예시 문장)"><select id="skin"><option>glow</option><option>candy</option><option>ginger</option><option>knit</option><option>bulb</option><option>gold</option></select>
+ <button id="wish">소원 보내기</button><button id="demo">소원 4개</button><button id="map">맵 전환</button><span class="sep"></span>
+ <button id="reset">리셋 (cmd reset)</button><button id="reload">전체 새로고침 (cmd reload)</button>
+ <label><input type="checkbox" id="gap"> 벽 사이 간격 보기</label>
+</header>
+<div id="wall"></div>
+<div id="bottom"><div id="phone"></div><div id="log"></div></div>
+<script>/* ============================================================
+   공용 통신 레이어 (game.html / phone.html / test.html 공유)
+   - ?ws=ws://192.168.0.100:8090  → 로컬 WebSocket 릴레이(PC 여러 대)
+   - 파라미터 없으면 BroadcastChannel  → PC 한 대에서 창/탭/iframe 테스트
+   메시지는 모두 JSON. 릴레이는 받은 메시지를 다른 모든 클라이언트에 그대로 뿌림.
+   ============================================================ */
+(function(){
+const QP=new URLSearchParams(location.search);
+const ROOM=QP.get('room')||'demo';
+function makeNet(role,screen){
+  const handlers=[];let ws=null,bc=null,mode,open=false;const queue=[];
+  const emit=m=>{for(const h of handlers)try{h(m);}catch(e){console.error(e);}};
+  const url=QP.get('ws');
+  if(url){mode='ws';
+    const connect=()=>{ws=new WebSocket(url);
+      ws.onopen=()=>{open=true;ws.send(JSON.stringify({type:'hello',role,screen,room:ROOM}));while(queue.length)ws.send(queue.shift());emit({type:'_net',up:true});};
+      ws.onmessage=e=>{let m;try{m=JSON.parse(e.data);}catch(_){return;}if(m.room&&m.room!==ROOM)return;emit(m);};
+      ws.onclose=()=>{open=false;emit({type:'_net',up:false});setTimeout(connect,1500);};
+      ws.onerror=()=>{try{ws.close();}catch(_){}};};
+    connect();
+  }else{mode='bc';bc=new BroadcastChannel('madsync-'+ROOM);bc.onmessage=e=>emit(e.data);open=true;setTimeout(()=>emit({type:'_net',up:true}),0);}
+  return {mode,room:ROOM,
+    send(m){m.room=ROOM;if(mode==='bc'){bc.postMessage(m);return;}const s=JSON.stringify(m);if(open&&ws.readyState===1)ws.send(s);else if(queue.length<50)queue.push(s);},
+    on(h){handlers.push(h);},
+    get up(){return open;}};
+}
+/* 백그라운드에서도 멈추지 않는 타이머 (Worker 기반 — 숨은 탭에서 setInterval 1Hz 제한 회피) */
+function steadyTimer(hz,cb){
+  try{const src=`let id=setInterval(()=>postMessage(0),${Math.round(1000/hz)});`;
+    const w=new Worker(URL.createObjectURL(new Blob([src],{type:'text/javascript'})));w.onmessage=cb;return ()=>w.terminate();}
+  catch(e){const id=setInterval(cb,1000/hz);return ()=>clearInterval(id);}
+}
+window.MadNet={makeNet,steadyTimer,QP,ROOM};
+})();
+</script>
+<script>
+/* MadSync 마스터 역할 흉내: 상태(status) 수신 → 표시, 명령(cmd) 송신.
+   화면 N개 = iframe N개 (각각 독립 문서 = PC N대와 같은 구조). 1번(PC1, 마스터)이 호스트.
+   오른쪽 아래 폰 = 실제 리모트(fur_remote)가 이 테스트 방(room)으로 PeerJS 연결 → 진짜 폰으로 QR 찍어도 됨 */
+const {makeNet,QP}=window.MadNet;
+if(!QP.get('room')){const p=new URLSearchParams(location.search);p.set('room','aplan-santa-test');location.replace('?'+p);}
+const ROOM=QP.get('room');document.getElementById('room').textContent=ROOM;
+const REMOTE=QP.get('remote')||'https://s1hampoo.github.io/SANTA/fur_remote';
+const q=s=>{const p=new URLSearchParams(location.search);p.delete('screen');p.delete('host');for(const [k,v] of Object.entries(s))p.set(k,v);return p.toString();};
+const WALL_W=(QP.get('walls')||'3952,6200,4400,6100').split(',').map(Number).filter(v=>v>0);
+const SEG=[];{let a=0;for(const w of WALL_W){SEG.push([a,a+w]);a+=w;}}const WORLD=SEG[SEG.length-1][1];
+const wall=document.getElementById('wall');
+function layout(){const gap=document.getElementById('gap').checked?14*(SEG.length-1):0;const s=(innerWidth-28-gap)/WORLD;
+  wall.innerHTML='';SEG.forEach(([a,b],i)=>{const d=document.createElement('div');d.className='scr';
+    const f=document.createElement('iframe');f.src='santa_split.html?'+q({screen:i+1,...(i===0?{host:1}:{})});f.style.width=(b-a)*s+'px';f.style.height=1200*s+'px';f.allow='autoplay';
+    d.appendChild(f);const sp=document.createElement('span');sp.textContent=`screen=${i+1}${i===0?' (host)':''} · ${a}–${b}`;d.appendChild(sp);wall.appendChild(d);});}
+document.getElementById('gap').onchange=e=>{wall.classList.toggle('gap',e.target.checked);};
+layout();
+document.getElementById('phone').innerHTML=`<iframe src="${REMOTE}?room=${encodeURIComponent(ROOM)}" allow="vibrate"></iframe>`;
+const net=makeNet('control','madsync');const log=document.getElementById('log');
+const L=t=>{log.textContent=`${new Date().toLocaleTimeString()}  ${t}\n`+log.textContent.slice(0,8000);};
+net.on(m=>{if(m.type==='status'){const el=document.getElementById('st');if(el.textContent!==m.state)L(`status → ${m.state} (배달 ${m.count}, step ${m.step})`);el.textContent=m.state;el.className='st '+m.state;document.getElementById('cnt').textContent=m.count;}
+  else if(m.type==='session')L(`세션 ${m.sess.id}${m.to?' → '+m.to+' 에게 (이벤트 '+m.evs.length+'개)':' 시작'}`);
+  else if(m.type==='join')L(`join screen=${m.screen}`);
+  else if(m.type==='ev')L(`이벤트 #${m.ev.n} step ${m.ev.s}: ${m.ev.k} ${m.ev.text||m.ev.kind||m.ev.d||''}`);});
+const cmd=(c,extra={})=>{net.send({type:'cmd',cmd:c,...extra});L('cmd '+c+(extra.text?' '+extra.text:''));};
+document.getElementById('wish').onclick=()=>{const t=document.getElementById('txt').value.trim();cmd('wish',{text:t||undefined,skin:document.getElementById('skin').value});document.getElementById('txt').value='';};
+document.getElementById('txt').onkeydown=e=>{if(e.key==='Enter')document.getElementById('wish').click();};
+for(const c of ['demo','map','reset','reload'])document.getElementById(c).onclick=()=>cmd(c);
+L('테스트 시작 — 폰(오른쪽 아래)에서 소원을 보내거나 위 버튼을 눌러 보세요. 화면 iframe 을 클릭하고 T/Y/1~9 키도 됩니다.');
+</script></body></html>
