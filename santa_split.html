@@ -1284,6 +1284,7 @@ NET.on(m=>{
   if(m.type==='_net'){if(m.up&&!IS_HOST)NET.send({type:'join',from:MYID,screen:SCREEN});return;}
   if(m.type==='cmd'){
     if(m.cmd==='reload'){if(IS_HOST)hostReset();else setTimeout(()=>location.reload(),400);return;}
+    if(m.cmd==='sound_on'||m.cmd==='sound_off'){if(window.bgmSetActive)window.bgmSetActive(m.cmd==='sound_on');return;}
     if(!IS_HOST)return;
     if(m.cmd==='reset'||m.cmd==='start')hostReset();
     else if(m.cmd==='demo')hostKey('Y');
@@ -1387,12 +1388,15 @@ function sparkle(t){box(N(['C6','E6','G6','C7','E7'][Math.random()*5|0]),t,.05,1
 function song(t0){let t=t0;for(const [n,b] of MEL){if(n)box(N(n),t,.16);t+=b*BEAT;}
   BARS.forEach((c,i)=>{const tb=t0+i*BAR;pad(CH[c].map(N),tb,BAR,.035);box(N(CH[c][0])/2*2,tb,.07,3);box(N(CH[c][2]),tb+BEAT,.045,1.8);box(N(CH[c][1]),tb+BEAT*2,.045,1.8);if(Math.random()<.35)sparkle(tb+BEAT*(1+Math.random()*2));});
   setTimeout(()=>song(t0+SONG+BAR),(t0+SONG-ac.currentTime-1.5)*1000);}
-function start(){if(started){if(ac.state==='suspended')ac.resume();return;}started=true;init();song(ac.currentTime+.4);hint.remove();}
-addEventListener('pointerdown',start);addEventListener('keydown',e=>{if(e.key==='m'||e.key==='M'){if(!started)return start();muted=!muted;master.gain.setTargetAtTime(muted?0:VOL,ac.currentTime,.2);}else start();});
+let active=!(SPLIT&&QP.get('sound')!=='1');window.__soundActive=()=>active;
+const gainT=()=>(muted||!active)?0:VOL;
+window.bgmSetActive=on=>{active=!!on;if(!started)start();if(ac){if(ac.state==='suspended')ac.resume();master.gain.setTargetAtTime(gainT(),ac.currentTime,on?.6:.4);}};
+function start(){if(started){if(ac.state==='suspended')ac.resume();return;}started=true;init();master.gain.value=gainT();song(ac.currentTime+.4);hint.remove();}
+addEventListener('pointerdown',start);addEventListener('keydown',e=>{if(e.key==='m'||e.key==='M'){if(!started)return start();muted=!muted;master.gain.setTargetAtTime(gainT(),ac.currentTime,.2);}else start();});
 // 크롬을 --autoplay-policy=no-user-gesture-required 로 띄우면 클릭 없이 자동 시작
 try{const t=new (window.AudioContext||window.webkitAudioContext)();if(t.state==='running'){t.close();start();}else t.close();}catch(e){}
 // 소원 공개 순간: 작은 반짝 종소리 (BGM에 섞임)
-window.bgmChime=()=>{if(!started||muted)return;const t=ac.currentTime+.02;['G5','C6','E6'].forEach((n,i)=>box(N(n),t+i*.09,.09,1.8));};
+window.bgmChime=()=>{if(!started||muted||!active)return;const t=ac.currentTime+.02;['G5','C6','E6'].forEach((n,i)=>box(N(n),t+i*.09,.09,1.8));};
 })();
 </script>
 </body>
