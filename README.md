@@ -50,12 +50,6 @@ PC2~4 는 이 PC의 릴레이(포트 8090)에서 게임 파일을 받아가므�
 - 크롬으로 확인만 하고 싶을 때: `OPEN_CHROME_TEST.bat` (쇼 중엔 쓰지 않기)
 - **PC1 WebSpout 주소에만 `host=1`** — 다른 PC/창에 host=1 이 또 열리면 폰 연결이 꼬임
 
-## 사운드 = MadMapper 큐에서 켜고 끄기
-게임은 상시 실행, 소리는 **웹게임 큐일 때만**. 기본은 소리 꺼짐(무음으로 계속 재생 중)
-- OSC (UDP, PC1 `192.168.5.20:8000`): `/santa/sound 1` 켜기 · `/santa/sound 0` 끄기 (0.6초 페이드)
-  - MadMapper 웹게임 큐 진입 시 `/santa/sound 1`, 다음 큐에서 `/santa/sound 0`
-  - 그 밖에 `/santa/reset` `/santa/demo` `/santa/reload`
-- HTTP: `http://192.168.5.20:8090/cmd/sound_on` · `/cmd/sound_off`
-- 릴레이가 마지막 상태를 기억 → 게임이 새로고침돼도 같은 상태로 복귀
-- 소리는 PC1(호스트)에서만 남. 테스트용 항상 켜기: 주소에 `&sound=1`
-- WebSpout에서 클릭 없이 소리 나게: PC1에서 한 번 `setx WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS "--autoplay-policy=no-user-gesture-required"` (START.bat 경유 실행 시엔 자동)
+## 사운드
+기본: 게임 화면이 켜져 있으면 항상 소리 (PC1 호스트에서만)
+(선택) MadMapper 큐로 켜고 끄려면 PC1 WebSpout 주소에 `&sound=cue` → OSC `192.168.5.20:8000` `/santa/sound 1|0` 또는 `/cmd/sound_on|off`

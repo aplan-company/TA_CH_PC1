@@ -1396,7 +1396,7 @@ function sparkle(t){box(N(['C6','E6','G6','C7','E7'][Math.random()*5|0]),t,.05,1
 function song(t0){let t=t0;for(const [n,b] of MEL){if(n)box(N(n),t,.16);t+=b*BEAT;}
   BARS.forEach((c,i)=>{const tb=t0+i*BAR;pad(CH[c].map(N),tb,BAR,.035);box(N(CH[c][0])/2*2,tb,.07,3);box(N(CH[c][2]),tb+BEAT,.045,1.8);box(N(CH[c][1]),tb+BEAT*2,.045,1.8);if(Math.random()<.35)sparkle(tb+BEAT*(1+Math.random()*2));});
   setTimeout(()=>song(t0+SONG+BAR),(t0+SONG-ac.currentTime-1.5)*1000);}
-let active=!(SPLIT&&QP.get('sound')!=='1');window.__soundActive=()=>active;
+let active=QP.get('sound')!=='cue'; // 기본: 항상 소리 · ?sound=cue 면 MadMapper/OSC 신호 올 때만window.__soundActive=()=>active;
 const gainT=()=>(muted||!active)?0:VOL;
 window.bgmSetActive=on=>{active=!!on;if(!started)start();if(ac){if(ac.state==='suspended')ac.resume();master.gain.setTargetAtTime(gainT(),ac.currentTime,on?.6:.4);}};
 function start(){if(started){if(ac.state==='suspended')ac.resume();return;}started=true;init();master.gain.value=gainT();song(ac.currentTime+.4);hint.remove();}
