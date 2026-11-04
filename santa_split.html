@@ -675,7 +675,7 @@ function puff(x,y,n=6){for(let i=0;i<n;i++)parts.push({x:x+rnd(-14,14),y:y+rnd(-
 function flashHouse(h){for(const i of h.wins)windows[i].boost=1;laserSend('/santa/cue/chimney',1,+(h.cx/W).toFixed(3));}
 
 /* 카드: 남는 문구 */
-const TS=Math.max(.5,+(SQ.get('text')||3)); // 소원 글씨 배율
+const TS=Math.max(.5,+(SQ.get('text')||1.5)); // 소원 글씨 배율
 let SPOT_R=null; // 지금 만드는 배달의 벽 구간 [x0,x1]
 const wallR=w=>(w&&SEGS[w-1])?SEGS[w-1]:null;
 const CARD_FONT="bold 70px 'Nanum Pen Script','Gowun Batang',serif",CARD_LH=78;
