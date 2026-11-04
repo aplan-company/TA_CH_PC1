@@ -232,7 +232,7 @@ connect();
 setInterval(()=>{if(conn&&ready){try{conn.send({type:'ping'});}catch(e){}if(Date.now()-lastPong>15000){ready=false;setStatus('재연결 중');update();connect();}}},6000);
 function progress(p){progEl.style.strokeDashoffset=100*(1-p);}
 send.onclick=()=>{if(!conn||!ready||!text.value.trim())return;
-  conn.send({type:'wish',text:text.value.trim(),name:'',skin});if(window.sfxSend)window.sfxSend();if(navigator.vibrate)navigator.vibrate(30);send.disabled=true;send.textContent='보내는 중…';text.blur();
+  conn.send({type:'wish',text:text.value.trim(),name:'',skin,wall:+(new URLSearchParams(location.search).get('w'))||0});if(window.sfxSend)window.sfxSend();if(navigator.vibrate)navigator.vibrate(30);send.disabled=true;send.textContent='보내는 중…';text.blur();
   done.classList.remove('ok');done.classList.add('show');progress(0);dmsg.textContent='배달 중';requestAnimationFrame(()=>setTimeout(()=>progress(.6),60));
   waitingAck=setTimeout(()=>{dmsg.textContent='화면이 받지 못했어요 · 다시 연결 중';connect();},4000);};
 $('#again').onclick=()=>{done.classList.remove('show','ok');text.value='';send.textContent='산타에게 보내기';update();};
