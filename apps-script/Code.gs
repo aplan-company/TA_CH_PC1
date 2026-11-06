@@ -23,6 +23,7 @@ function doPost(e) {
   lock.waitLock(20000);
   try {
     const body = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+    if (body.inbox) return out_(inboxPut_(body.inbox));
     const list = Array.isArray(body.rows) ? body.rows : [body];
     const rows = list.slice(0, 500).map(toRow);
     if (rows.length) {
@@ -38,7 +39,8 @@ function doPost(e) {
 }
 
 /** 브라우저로 URL 열면 연결 확인용 */
-function doGet() {
+function doGet(e) {
+  if (e && e.parameter && e.parameter.inbox) return out_(inboxGet_(+e.parameter.after));
   return out_({ok: true, sheet: SpreadsheetApp.getActiveSpreadsheet().getName(), rows: Math.max(0, logSheet_().getLastRow() - 1)});
 }
 
@@ -125,4 +127,38 @@ function testRow() {
 
 function out_(o) {
   return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);
+}
+
+/* ================= 폰 → 화면 우회 전달 (수신함) =================
+   현장 네트워크에서 폰-PC 직접 연결(PeerJS)이 막힐 때 사용.
+   폰: POST {inbox:{text,skin,wall,cid}} → '수신함' 시트에 쌓임
+   PC1(호스트): GET ?inbox=1&after=<마지막 번호> 를 2~3초마다 확인해서 새 소원만 가져감 */
+const INBOX_SHEET = '수신함';
+function inboxSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sh = ss.getSheetByName(INBOX_SHEET);
+  if (!sh) { sh = ss.insertSheet(INBOX_SHEET); sh.getRange(1, 1, 1, 6).setValues([['번호', '시각', '문장', '스킨', '벽', '폰ID']]).setFontWeight('bold'); sh.setFrozenRows(1); }
+  return sh;
+}
+function inboxPut_(w) {
+  const text = String(w.text || '').trim().slice(0, 80);
+  if (!text) return {ok: false, error: 'empty'};
+  const props = PropertiesService.getScriptProperties();
+  const id = (+props.getProperty('inboxLast') || 0) + 1;
+  inboxSheet_().appendRow([id, new Date(), /^[=+\-@]/.test(text) ? "'" + text : text, String(w.skin || 'glow').slice(0, 12), +w.wall || 0, String(w.cid || '').slice(0, 12)]);
+  props.setProperty('inboxLast', String(id));
+  CacheService.getScriptCache().put('inboxLast', String(id), 21600);
+  return {ok: true, id: id};
+}
+function inboxGet_(after) {
+  const cache = CacheService.getScriptCache();
+  let last = +cache.get('inboxLast');
+  if (!last) { last = +PropertiesService.getScriptProperties().getProperty('inboxLast') || 0; cache.put('inboxLast', String(last), 21600); }
+  if (!(after >= 0) || after >= last) return {ok: true, last: last, items: []};   // 처음 접속(after=-1)은 번호만 받아감
+  const sh = inboxSheet_(), n = sh.getLastRow() - 1;
+  if (n <= 0) return {ok: true, last: last, items: []};
+  const take = Math.min(n, Math.min(100, last - after + 5));
+  const rows = sh.getRange(sh.getLastRow() - take + 1, 1, take, 6).getValues();
+  const items = rows.filter(r => +r[0] > after).map(r => ({id: +r[0], text: String(r[2]).replace(/^'/, ''), skin: r[3], wall: +r[4] || 0, cid: r[5]}));
+  return {ok: true, last: last, items: items};
 }

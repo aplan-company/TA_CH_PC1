@@ -212,17 +212,23 @@ const q=new URLSearchParams(location.search);const id=q.get('id')||q.get('room')
 const $=s=>document.querySelector(s);
 const status=$('#status'),send=$('#send'),text=$('#text'),pill=$('#pill'),done=$('#done'),progEl=$('#prog'),dmsg=$('#dmsg'),hint=$('#hint');
 let conn=null,ready=false,peer=null,lastPong=0,waitingAck=null,skin='glow';
+/* 우회 전송: 폰↔화면 직접 연결이 6초 안에 안 되면 구글 Apps Script 수신함으로 보냄 (화면 PC가 2~3초마다 가져감) */
+const SHEET=q.get('sheet')||'https://script.google.com/macros/s/AKfycbzBsj_hIpYQ_hEQMlGfLmm2yFmr9jq57h7jbUsQ0h1zI9BKmEpweX4VTKxM7YJC9yYoiQ/exec';
+const CID=Math.random().toString(36).slice(2,8);let web=false,notReadySince=Date.now();
+function goWeb(){if(web||!SHEET||q.get('web')==='0')return;web=true;try{if(peer)peer.destroy();}catch(e){}conn=null;ready=true;setStatus('연결됨');update();}
+setInterval(()=>{if(ready){notReadySince=Date.now();return;}if(Date.now()-notReadySince>6000)goWeb();},1000);
 document.getElementById('skins').addEventListener('click',e=>{const b=e.target.closest('.sk');if(!b)return;skin=b.dataset.skin;for(const x of document.querySelectorAll('.sk'))x.classList.toggle('on',x===b);if(navigator.vibrate)navigator.vibrate(8);});
 function update(){const ok=ready&&!!text.value.trim();send.disabled=!ok;$('#c').textContent=text.value.length;pill.classList.toggle('on',ready);hint.textContent=ready?(ok?'':'소원을 적으면 보낼 수 있어요'):'화면과 연결되면 보낼 수 있어요';}
 text.addEventListener('input',update);
 function setStatus(s){status.textContent=s;}
 function connect(){
+  if(web)return;
   if(peer){try{peer.destroy();}catch(e){}}
   ready=false;update();setStatus('연결 중');
   peer=new Peer();
   peer.on('open',()=>{conn=peer.connect(id,{reliable:true});
     conn.on('open',()=>{ready=true;lastPong=Date.now();setStatus('연결됨');update();});
-    conn.on('data',d=>{if(d&&d.type==='pong')lastPong=Date.now();if(d&&d.type==='ack'){lastPong=Date.now();if(window.sfxDone)window.sfxDone();if(waitingAck){clearTimeout(waitingAck);waitingAck=null;}progress(1);done.classList.add('ok');dmsg.textContent='배달 완료';if(navigator.vibrate)navigator.vibrate([20,40,20]);}
+    conn.on('data',d=>{if(d&&d.type==='pong')lastPong=Date.now();if(d&&d.type==='ack'){lastPong=Date.now();onAck('배달 완료');}
       if(d&&d.type==='reject'){lastPong=Date.now();if(waitingAck){clearTimeout(waitingAck);waitingAck=null;}progress(0);done.classList.remove('ok');dmsg.textContent='보낼 수 없는 표현이 있어요 · 다른 문장으로 써 주세요';if(navigator.vibrate)navigator.vibrate([60,40,60]);}});
     conn.on('close',()=>{ready=false;setStatus('재연결 중');update();setTimeout(connect,2000);});
     conn.on('error',()=>{ready=false;setStatus('재연결 중');update();setTimeout(connect,3000);});});
@@ -231,10 +237,14 @@ function connect(){
 connect();
 setInterval(()=>{if(conn&&ready){try{conn.send({type:'ping'});}catch(e){}if(Date.now()-lastPong>15000){ready=false;setStatus('재연결 중');update();connect();}}},6000);
 function progress(p){progEl.style.strokeDashoffset=100*(1-p);}
-send.onclick=()=>{if(!conn||!ready||!text.value.trim())return;
-  conn.send({type:'wish',text:text.value.trim(),name:'',skin,wall:+(new URLSearchParams(location.search).get('w'))||0});if(window.sfxSend)window.sfxSend();if(navigator.vibrate)navigator.vibrate(30);send.disabled=true;send.textContent='보내는 중…';text.blur();
+function onAck(msg){if(window.sfxDone)window.sfxDone();if(waitingAck){clearTimeout(waitingAck);waitingAck=null;}progress(1);done.classList.add('ok');dmsg.textContent=msg;if(navigator.vibrate)navigator.vibrate([20,40,20]);}
+function sendWeb(w){const body=JSON.stringify({inbox:Object.assign({cid:CID},w)});
+  fetch(SHEET,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body}).then(r=>r.json()).then(d=>{if(d&&d.ok)onAck('배달 완료 · 곧 화면에 나타나요');else{if(waitingAck){clearTimeout(waitingAck);waitingAck=null;}dmsg.textContent='보내지 못했어요 · 다시 시도해 주세요';}})
+  .catch(()=>{fetch(SHEET,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body}).then(()=>onAck('배달 완료 · 곧 화면에 나타나요')).catch(()=>{dmsg.textContent='인터넷 연결을 확인해 주세요';});});}
+send.onclick=()=>{if(!ready||!text.value.trim()||(!web&&!conn))return;
+  const W={type:'wish',text:text.value.trim(),name:'',skin,wall:+(new URLSearchParams(location.search).get('w'))||0};if(web)sendWeb(W);else conn.send(W);if(window.sfxSend)window.sfxSend();if(navigator.vibrate)navigator.vibrate(30);send.disabled=true;send.textContent='보내는 중…';text.blur();
   done.classList.remove('ok');done.classList.add('show');progress(0);dmsg.textContent='배달 중';requestAnimationFrame(()=>setTimeout(()=>progress(.6),60));
-  waitingAck=setTimeout(()=>{dmsg.textContent='화면이 받지 못했어요 · 다시 연결 중';connect();},4000);};
+  waitingAck=setTimeout(()=>{if(web){dmsg.textContent='조금 느려요 · 잠시만 기다려 주세요';return;}dmsg.textContent='화면이 받지 못했어요 · 다시 연결 중';connect();},web?15000:4000);};
 $('#again').onclick=()=>{done.classList.remove('show','ok');text.value='';send.textContent='산타에게 보내기';update();};
 </script>
 

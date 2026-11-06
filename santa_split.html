@@ -1366,6 +1366,25 @@ const SLOG={conns:0,sents:0,rejects:0,buf:[],meta:new Map(),cinfo:new Map(),
     try{fetch(SHEET_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({rows}),keepalive:true}).catch(()=>{this.buf.unshift(...rows);});}catch(_){this.buf.unshift(...rows);}}};
 if(IS_HOST){SLOG.push({kind:'boot',note:'화면 시작 · screen '+SCREEN+(SESS?' · 세션 '+SESS.id:'')});setInterval(()=>SLOG.flush(),3000);addEventListener('pagehide',()=>SLOG.flush());
   const _pc=placeCard;window.placeCard=function(w){const r=_pc.apply(this,arguments);if(w&&w.lid)SLOG.show(w);return r;};}
+
+/* ================= 폰 우회 수신 (호스트만) =================
+   현장 네트워크에서 폰↔PC 직접 연결(PeerJS)이 막히면, 폰은 구글 Apps Script '수신함'으로 소원을 보냄.
+   호스트가 2.5초마다 새 소원만 가져와 일반 소원과 똑같이 처리. ?inbox=0 끄기 */
+if(IS_HOST&&SHEET_URL&&SQ.get('inbox')!=='0'){
+  let cur=-1;try{const s=JSON.parse(localStorage.getItem('santa-inbox')||'null');if(s&&Date.now()-s.t<180000)cur=s.cur;}catch(_){}
+  let busy=false;
+  const pollInbox=()=>{if(busy)return;busy=true;
+    fetch(SHEET_URL+'?inbox=1&after='+cur,{cache:'no-store'}).then(r=>r.json()).then(d=>{
+      if(!d||!d.ok)return;
+      for(const it of d.items||[]){if(it.id<=cur)continue;cur=it.id;
+        const c={peer:'web-'+String(it.cid||it.id)};
+        const bad=SLOG.bad(it.text);
+        if(bad)SLOG.reject(c,it.text,bad);else santaWish(it.text,it.skin||'glow',c,it.wall);}
+      if(cur<0||d.last<cur)cur=d.last;   // 첫 접속: 지난 소원은 건너뜀
+      try{localStorage.setItem('santa-inbox',JSON.stringify({cur,t:Date.now()}));}catch(_){}
+    }).catch(()=>{}).finally(()=>{busy=false;});};
+  pollInbox();setInterval(pollInbox,2500);
+}
 </script>
 
 <div id="bgmHint" style="position:fixed;right:24px;bottom:24px;z-index:20;font:600 15px 'Gowun Batang',serif;color:#fff3d6;background:rgba(5,11,28,.7);border:1px solid rgba(245,200,106,.5);border-radius:999px;padding:8px 16px;cursor:pointer">♪ 클릭하면 음악이 시작돼요</div>
