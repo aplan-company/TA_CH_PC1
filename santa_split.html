@@ -1277,6 +1277,17 @@ function hostInput(e){if(!IS_HOST||!SESS)return;
    → 호스트가 한가할 때(배달·대기 없음) ?renew=분 (기본 15) 마다 새 세션으로 갈아탐.
    벽에 떠 있는 소원 카드·맵·배달 수는 새 세션으로 그대로 옮김 (화면은 잠깐 다시 그려짐). ?renew=0 끄기 */
 const RENEW_MIN=SQ.has('renew')?+SQ.get('renew'):15;
+/* 쇼 시간표 (PC1 시계 기준): ?shows=12,15,18,21 (시) · ?showmin=5 (쇼 길이, 분) · ?shows=0 끄기
+   - 쇼 2분 전에 새 세션으로 갈아탐 → 매 쇼는 빈 벽에서 시작 (맵·배달 수는 유지)
+   - 쇼 3분 전 ~ 쇼 끝 1분 후에는 15분 자동 갱신을 하지 않음 (쇼 중 화면 깜빡임 방지) */
+const SHOWS=(SQ.get('shows')||'12,15,18,21').split(',').map(Number).filter(h=>h>0&&h<=24);
+const SHOW_MIN=+(SQ.get('showmin')||5);
+function showInfo(){const n=new Date(),m=n.getHours()*60+n.getMinutes()+n.getSeconds()/60;let pre=null,inWin=false;
+  for(const h of SHOWS){let dm=(h%24)*60-m;if(dm<-720)dm+=1440;if(dm>720)dm-=1440;
+    if(dm>-(SHOW_MIN+1)&&dm<3)inWin=true;                 // 쇼 3분 전 ~ 쇼 끝 1분 후
+    if(dm<=2&&dm>0)pre=h+':'+n.toDateString();}          // 쇼 2분 전 ~ 시작 직전
+  return{pre,inWin};}
+let SHOW_DONE='',PRE_T=0;try{SHOW_DONE=localStorage.getItem('santa-showrenew')||'';}catch(_){}
 function makeCarry(){return{map:mapKey,count,cards:cards.filter(c=>!c.dying).slice(-60).map(c=>c.style==='aurora'
   ?{a:1,text:c.text,name:c.name||'',x:c.x,y:c.y,pos:c.pos}
   :{text:c.text,skin:c.skin,x:c.x,y:c.y,top:c.top,ty:c.ty,sx:c.sx,pos:c.pos,tilt:c.tilt||0})};}
@@ -1288,8 +1299,8 @@ function applyCarry(cr){
     cards.push({text:c.text,name:'',skin:c.skin||'glow',x:c.x,y:c.y,top:c.top,ty:c.ty,sx:c.sx,th,lines,pos:c.pos,tilt:c.tilt||0,style:'card',born:-60000,alpha:1,ph:SRND()*6});}
   count=+cr.count||count;try{document.getElementById('n').textContent=count;}catch(_){}}
 let RENEWING=false;
-function renewSession(why){if(!IS_HOST||RENEWING)return;RENEWING=true;try{sessionStorage.setItem('santa-quiet',String(Date.now()));}catch(_){}console.log('[santa] 세션 갱신:',why);
-  const s=newSession(2500);s.carry=makeCarry();try{sessionStorage.setItem('santa-next',JSON.stringify(s));}catch(_){}
+function renewSession(why,clear){if(!IS_HOST||RENEWING)return;RENEWING=true;try{sessionStorage.setItem('santa-quiet',String(Date.now()));}catch(_){}console.log('[santa] 세션 갱신:',why);
+  const s=newSession(2500);s.carry=makeCarry();if(clear)s.carry.cards=[];try{sessionStorage.setItem('santa-next',JSON.stringify(s));}catch(_){}
   NET.send({type:'session',sess:s,evs:[]});setTimeout(()=>location.reload(),150);}
 function hostReset(){RENEWING=true;const s=newSession(2500);try{sessionStorage.setItem('santa-next',JSON.stringify(s));}catch(_){}
   NET.send({type:'session',sess:s,evs:[]});setTimeout(()=>location.reload(),150);}
@@ -1349,7 +1360,11 @@ if(IS_HOST){
   let lastState='';
   try{const a=JSON.parse(sessionStorage.getItem('santa-pend')||'[]');sessionStorage.removeItem('santa-pend');if(a.length)setTimeout(()=>{for(const w of a)santaWish(...w);},3000);}catch(_){}
   MadNet.steadyTimer(2,()=>{if(!SESS)return;const state=(queue.length||actors.length)?'playing':'idle';
-    if(RENEW_MIN>0&&simStep>RENEW_MIN*3600&&state==='idle'&&!EVQ.size&&!boxes.length&&!effects.length)renewSession('세션 '+Math.round(simStep/3600)+'분');
+    const idle=state==='idle'&&!EVQ.size&&!boxes.length&&!effects.length;const SI=SHOWS.length?showInfo():{pre:null,inWin:false};
+    if(SI.pre&&SI.pre!==SHOW_DONE){/* 쇼 2분 전: 한가하면 바로, 바빠도 1분 안에는 갱신 (빈 벽으로) */
+      if(!PRE_T)PRE_T=Date.now();
+      if(idle||Date.now()-PRE_T>60000){SHOW_DONE=SI.pre;try{localStorage.setItem('santa-showrenew',SI.pre);}catch(_){}renewSession('쇼 시작 전 '+SI.pre,true);}}
+    else if(!SI.inWin&&RENEW_MIN>0&&simStep>RENEW_MIN*3600&&idle)renewSession('세션 '+Math.round(simStep/3600)+'분');
     NET.send({type:'status',state,count,step:simStep,sid:SESS.id,screen:SCREEN});
     if(state!==lastState){lastState=state;console.log('[santa] status',state);}
     /* 체크섬 방송 */
