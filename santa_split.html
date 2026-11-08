@@ -1221,7 +1221,9 @@ for(const k of ['drawElf','stripes','starsDraw','auroraDraw','drawDeer','drawBox
 const HUD=document.createElement('div');HUD.style.cssText='position:fixed;left:10px;bottom:8px;z-index:30;font:12px ui-monospace,Menlo,monospace;color:#fff3d6;opacity:.55;pointer-events:none;white-space:pre';
 if(SQ.get('hud')!=='0')document.body.appendChild(HUD);
 const OVL=document.createElement('div');OVL.style.cssText='position:fixed;inset:0;z-index:25;display:none;align-items:center;justify-content:center;font:600 28px "Gowun Batang",serif;color:#f5c86a;background:rgba(5,11,28,.55);pointer-events:none';document.body.appendChild(OVL);
-const overlay=t=>{OVL.style.display=t?'flex':'none';if(t)OVL.textContent=t;};
+/* 자동 세션 갱신 직후 10초는 안내 글씨를 숨김 (관객에게 '기다리는 중' 문구가 안 보이게) */
+let QUIET=0;try{QUIET=+sessionStorage.getItem('santa-quiet')||0;sessionStorage.removeItem('santa-quiet');}catch(_){}
+const overlay=t=>{if(t&&Date.now()-QUIET<10000)t='';OVL.style.display=t?'flex':'none';if(t)OVL.textContent=t;};
 
 function applyEv(e){
   if(e.k==='wish'){const n=queue.length;addWish(e.text,'',e.skin);if(queue.length>n){queue[n].lid=e.n;if(e.wall)queue[n].wall=e.wall;}}
@@ -1233,17 +1235,22 @@ function queueEv(e){
   if(started&&e.s<simStep)return resync('늦게 도착한 이벤트');
   lastN=e.n;(EVQ.get(e.s)||EVQ.set(e.s,[]).get(e.s)).push(e);}
 let resyncing=false;
-function resync(why){if(resyncing)return;resyncing=true;console.warn('[santa] 재동기화:',why);overlay('화면 다시 맞추는 중… ('+why+')');
+function resync(why){if(resyncing)return;resyncing=true;if(why==='새 세션'){try{sessionStorage.setItem('santa-quiet',String(Date.now()));}catch(_){}}console.warn('[santa] 재동기화:',why);overlay('화면 다시 맞추는 중… ('+why+')');
   try{sessionStorage.setItem('santa-resync',String((+sessionStorage.getItem('santa-resync')||0)+1));}catch(_){}
   setTimeout(()=>location.reload(),300);}
 
+let BG_DIRTY=false;
 let FPS=0,DRAWMS=0,_fc=0,_ft=performance.now();
 function stepOnce(draw){const _t0=draw?performance.now():0;
-  if(simStep===0)SRESEED(SESS.seed);
+  if(simStep===0){SRESEED(SESS.seed);if(SESS.carry)applyCarry(SESS.carry);}
   const evs=EVQ.get(simStep);if(evs){EVQ.delete(simStep);for(const e of evs)applyEv(e);}
   if(simStep%120===0){RS.set(simStep,RSTATE);if(RS.size>40)RS.delete(RS.keys().next().value);checkChk(simStep);}
+  const _mk=mapKey;
   ctx=draw?realCtx:NOOP;bg=draw?realBg:NOOP;
   try{simFrame();}finally{ctx=realCtx;bg=realBg;}
+  /* 그림 없이 진행하는 동안 맵이 바뀌었으면 배경을 다시 그려야 함 */
+  if(!draw&&mapKey!==_mk)BG_DIRTY=true;
+  if(draw&&BG_DIRTY&&!trans){BG_DIRTY=false;realBg.drawImage(mapCanvas,0,0);}
   if(draw){DRAWMS=DRAWMS*.9+(performance.now()-_t0)*.1;_fc++;const n=performance.now();if(n-_ft>=1000){FPS=Math.round(_fc*1000/(n-_ft));_fc=0;_ft=n;}}
   simStep++;SIMNOW=simStep*STEP_MS;}
 
@@ -1252,7 +1259,7 @@ function pump(canDraw){
   if(!ready||!SESS||resyncing)return;
   const tgt=Math.min(targetCount(),STOPAT);if(tgt<=simStep){return;}
   started=true;
-  const behind=tgt-simStep,until=performance.now()+(behind>4?28:1e6);
+  const behind=tgt-simStep,until=performance.now()+(behind>600?(canDraw?90:200):behind>4?28:1e6); /* 많이 밀렸으면(10초 이상) 그림 없이 크게 몰아서 */
   while(simStep<tgt){const last=simStep===tgt-1;if(!last&&performance.now()>until)break;stepOnce(canDraw&&last);}
   if(simStep<tgt-30)overlay('따라잡는 중… '+Math.round((tgt-simStep)/60)+'초');else if(OVL.style.display!=='none'&&!resyncing)overlay('');
   if(canDraw)lastDraw=performance.now();}
@@ -1266,7 +1273,25 @@ function newSession(delay){return{id:Math.random().toString(36).slice(2,9),seed:
 function hostInput(e){if(!IS_HOST||!SESS)return;
   e.s=Math.max(targetCount(),simStep)+D_STEPS;e.n=++evN;EVLOG.push(e);if(EVLOG.length>20000)EVLOG.splice(0,1);/* 아주 긴 세션 보호 */
   lastN=e.n-1;queueEv(e);NET.send({type:'ev',sid:SESS.id,ev:e});}
-function hostReset(){const s=newSession(2500);try{sessionStorage.setItem('santa-next',JSON.stringify(s));}catch(_){}
+/* ---- 세션 자동 갱신: 세션이 길어지면 늦게 들어온 화면이 처음부터 따라잡느라 오래 걸림 (1869초 등)
+   → 호스트가 한가할 때(배달·대기 없음) ?renew=분 (기본 15) 마다 새 세션으로 갈아탐.
+   벽에 떠 있는 소원 카드·맵·배달 수는 새 세션으로 그대로 옮김 (화면은 잠깐 다시 그려짐). ?renew=0 끄기 */
+const RENEW_MIN=SQ.has('renew')?+SQ.get('renew'):15;
+function makeCarry(){return{map:mapKey,count,cards:cards.filter(c=>!c.dying).slice(-60).map(c=>c.style==='aurora'
+  ?{a:1,text:c.text,name:c.name||'',x:c.x,y:c.y,pos:c.pos}
+  :{text:c.text,skin:c.skin,x:c.x,y:c.y,top:c.top,ty:c.ty,sx:c.sx,pos:c.pos,tilt:c.tilt||0})};}
+function applyCarry(cr){
+  try{if(cr.map&&cr.map!==mapKey)setMap(cr.map,true);}catch(e){console.warn('[santa] carry map',e);}
+  for(const c of cr.cards||[]){
+    if(c.a){cards.push({text:c.text,name:c.name,x:c.x,y:c.y,pos:c.pos,style:'aurora',born:-60000,alpha:1,ph:SRND()*6,lines:[],th:0});continue;}
+    const lines=wrap(c.text,720,fontFor(c.skin));const th=lines.length*CARD_LH;
+    cards.push({text:c.text,name:'',skin:c.skin||'glow',x:c.x,y:c.y,top:c.top,ty:c.ty,sx:c.sx,th,lines,pos:c.pos,tilt:c.tilt||0,style:'card',born:-60000,alpha:1,ph:SRND()*6});}
+  count=+cr.count||count;try{document.getElementById('n').textContent=count;}catch(_){}}
+let RENEWING=false;
+function renewSession(why){if(!IS_HOST||RENEWING)return;RENEWING=true;try{sessionStorage.setItem('santa-quiet',String(Date.now()));}catch(_){}console.log('[santa] 세션 갱신:',why);
+  const s=newSession(2500);s.carry=makeCarry();try{sessionStorage.setItem('santa-next',JSON.stringify(s));}catch(_){}
+  NET.send({type:'session',sess:s,evs:[]});setTimeout(()=>location.reload(),150);}
+function hostReset(){RENEWING=true;const s=newSession(2500);try{sessionStorage.setItem('santa-next',JSON.stringify(s));}catch(_){}
   NET.send({type:'session',sess:s,evs:[]});setTimeout(()=>location.reload(),150);}
 const SAMPLES=['내년엔 꼭 여행 가게 해주세요','가족 모두 건강하기','취업 성공!','우리 강아지 오래오래 살기','눈 오는 크리스마스','사랑하는 사람과 함께','매일 조금씩 더 행복하기','올해보다 나은 내년'];
 const SKIN_KEYS={z:'glow',x:'candy',c:'ginger',v:'knit',b:'bulb',n:'gold'};
@@ -1280,7 +1305,7 @@ function hostKey(k){
   else if(KIND_KEYS[k]){hostInput({k:'force',kind:KIND_KEYS[k]});santaWish(sample(),hostSkin);}
   else if(SKIN_KEYS[k]){hostSkin=SKIN_KEYS[k];santaWish(sample(),hostSkin);}}
 addEventListener('keydown',e=>{if(e.key==='m'||e.key==='M')return;if(IS_HOST)hostKey(e.key);else NET.send({type:'key',key:e.key});});
-window.santaWish=(text,skin,src,wall)=>{const e={k:'wish',text:String(text||'').slice(0,80),skin};wall=+wall|0;if(wall>=1&&wall<=SEGS.length)e.wall=wall;hostInput(e);if(e.n)SLOG.send(e,src);};
+window.santaWish=(text,skin,src,wall)=>{if(RENEWING){try{const a=JSON.parse(sessionStorage.getItem('santa-pend')||'[]');a.push([text,skin,src||null,wall]);sessionStorage.setItem('santa-pend',JSON.stringify(a));}catch(_){}return;}const e={k:'wish',text:String(text||'').slice(0,80),skin};wall=+wall|0;if(wall>=1&&wall<=SEGS.length)e.wall=wall;hostInput(e);if(e.n)SLOG.send(e,src);};
 
 /* ---- 체크섬: 120스텝마다 난수 상태 비교 → 어긋나면 그 화면만 다시 맞춤 ---- */
 function checkChk(s){const h=CHK.get(s);if(h===undefined||!RS.has(s))return;CHK.delete(s);
@@ -1322,7 +1347,9 @@ if(IS_HOST){
   NET.send({type:'session',sess:SESS,evs:[]});
   /* 상태 보고 (MadSync 마스터용): playing = 배달 진행 중 / idle = 대기 */
   let lastState='';
+  try{const a=JSON.parse(sessionStorage.getItem('santa-pend')||'[]');sessionStorage.removeItem('santa-pend');if(a.length)setTimeout(()=>{for(const w of a)santaWish(...w);},3000);}catch(_){}
   MadNet.steadyTimer(2,()=>{if(!SESS)return;const state=(queue.length||actors.length)?'playing':'idle';
+    if(RENEW_MIN>0&&simStep>RENEW_MIN*3600&&state==='idle'&&!EVQ.size&&!boxes.length&&!effects.length)renewSession('세션 '+Math.round(simStep/3600)+'분');
     NET.send({type:'status',state,count,step:simStep,sid:SESS.id,screen:SCREEN});
     if(state!==lastState){lastState=state;console.log('[santa] status',state);}
     /* 체크섬 방송 */
@@ -1331,6 +1358,10 @@ if(IS_HOST){
   const ping=()=>NET.send({type:'tping',from:MYID,a:clk()});
   let k=0;const pi=setInterval(()=>{ping();if(++k>=8){clearInterval(pi);setInterval(ping,3000);}},150);
   const ji=setInterval(()=>{if(SESS)return clearInterval(ji);NET.send({type:'join',from:MYID,screen:SCREEN});},1000);
+  /* 감시: 20초 넘게 시작을 못 하면(호스트 응답 없음) 스스로 새로고침해서 다시 접속 */
+  const wt0=Date.now();const wd=setInterval(()=>{if(ready){clearInterval(wd);return;}
+    const sec=Math.round((Date.now()-wt0)/1000);if(fontsOk)overlay(`호스트 기다리는 중… ${sec}초 (${NET.mode}${SESS?' · 세션 받음':' · 세션 없음'} · 시계 ${pongs}/3)`);
+    if(sec>=20)location.reload();},1000);
   NET.send({type:'join',from:MYID,screen:SCREEN});
 }
 
