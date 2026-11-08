@@ -1240,11 +1240,14 @@ function resync(why){if(resyncing)return;resyncing=true;if(why==='새 세션'){t
   setTimeout(()=>location.reload(),300);}
 
 let BG_DIRTY=false;
+const LIFE=SQ.has('life')?+SQ.get('life'):30;
 let FPS=0,DRAWMS=0,_fc=0,_ft=performance.now();
 function stepOnce(draw){const _t0=draw?performance.now():0;
   if(simStep===0){SRESEED(SESS.seed);if(SESS.carry)applyCarry(SESS.carry);}
   const evs=EVQ.get(simStep);if(evs){EVQ.delete(simStep);for(const e of evs)applyEv(e);}
   if(simStep%120===0){RS.set(simStep,RSTATE);if(RS.size>40)RS.delete(RS.keys().next().value);checkChk(simStep);}
+  /* 소원 문장 수명: 화면에 나타나고 ?life=초 (기본 30) 뒤 2초에 걸쳐 사라짐 · ?life=0 이면 안 사라짐 */
+  if(LIFE>0)for(const c of cards)if(!c.dying&&SIMNOW-c.born>LIFE*1000+500)c.dying=true;
   const _mk=mapKey;
   ctx=draw?realCtx:NOOP;bg=draw?realBg:NOOP;
   try{simFrame();}finally{ctx=realCtx;bg=realBg;}
@@ -1289,14 +1292,14 @@ function showInfo(){const n=new Date(),m=n.getHours()*60+n.getMinutes()+n.getSec
   return{pre,inWin};}
 let SHOW_DONE='',PRE_T=0;try{SHOW_DONE=localStorage.getItem('santa-showrenew')||'';}catch(_){}
 function makeCarry(){return{map:mapKey,count,cards:cards.filter(c=>!c.dying).slice(-60).map(c=>c.style==='aurora'
-  ?{a:1,text:c.text,name:c.name||'',x:c.x,y:c.y,pos:c.pos}
-  :{text:c.text,skin:c.skin,x:c.x,y:c.y,top:c.top,ty:c.ty,sx:c.sx,pos:c.pos,tilt:c.tilt||0})};}
+  ?{a:1,text:c.text,name:c.name||'',x:c.x,y:c.y,pos:c.pos,age:SIMNOW-c.born}
+  :{text:c.text,skin:c.skin,x:c.x,y:c.y,top:c.top,ty:c.ty,sx:c.sx,pos:c.pos,tilt:c.tilt||0,age:SIMNOW-c.born})};}
 function applyCarry(cr){
   try{if(cr.map&&cr.map!==mapKey)setMap(cr.map,true);}catch(e){console.warn('[santa] carry map',e);}
   for(const c of cr.cards||[]){
-    if(c.a){cards.push({text:c.text,name:c.name,x:c.x,y:c.y,pos:c.pos,style:'aurora',born:-60000,alpha:1,ph:SRND()*6,lines:[],th:0});continue;}
+    if(c.a){cards.push({text:c.text,name:c.name,x:c.x,y:c.y,pos:c.pos,style:'aurora',born:-(c.age||60000),alpha:1,ph:SRND()*6,lines:[],th:0});continue;}
     const lines=wrap(c.text,720,fontFor(c.skin));const th=lines.length*CARD_LH;
-    cards.push({text:c.text,name:'',skin:c.skin||'glow',x:c.x,y:c.y,top:c.top,ty:c.ty,sx:c.sx,th,lines,pos:c.pos,tilt:c.tilt||0,style:'card',born:-60000,alpha:1,ph:SRND()*6});}
+    cards.push({text:c.text,name:'',skin:c.skin||'glow',x:c.x,y:c.y,top:c.top,ty:c.ty,sx:c.sx,th,lines,pos:c.pos,tilt:c.tilt||0,style:'card',born:-(c.age||60000),alpha:1,ph:SRND()*6});}
   count=+cr.count||count;try{document.getElementById('n').textContent=count;}catch(_){}}
 let RENEWING=false;
 function renewSession(why,clear){if(!IS_HOST||RENEWING)return;RENEWING=true;try{sessionStorage.setItem('santa-quiet',String(Date.now()));}catch(_){}console.log('[santa] 세션 갱신:',why);
