@@ -1423,6 +1423,14 @@ const SLOG={conns:0,sents:0,rejects:0,buf:[],meta:new Map(),cinfo:new Map(),
 if(IS_HOST){SLOG.push({kind:'boot',note:'화면 시작 · screen '+SCREEN+(SESS?' · 세션 '+SESS.id:'')});setInterval(()=>SLOG.flush(),3000);addEventListener('pagehide',()=>SLOG.flush());
   const _pc=placeCard;window.placeCard=function(w){const r=_pc.apply(this,arguments);if(w&&w.lid)SLOG.show(w);return r;};}
 
+/* ================= 운영 리모컨 (웹 · 어디서나) =================
+   https://aplan-company.github.io/TA_CH_PC1/control.html → Apps Script 수신함에 "@ctl <PIN> <명령>" 을 남기면
+   호스트가 수신함을 가져올 때 실행. PIN 은 ?pin= 으로 바꿀 수 있음 */
+const CTL_PIN=SQ.get('pin')||'1225';
+function ctlCmd(t){const m=/^@ctl\s+(\S+)\s+(\S+)$/.exec(String(t||'').trim());if(!m||m[1]!==CTL_PIN)return;
+  const c=m[2],lm=/^life_(\d+)$/.exec(c);
+  if(lm){const v=Math.min(3600,+lm[1]);hostInput({k:'life',v});SLOG.push({kind:'sys',note:'(웹 리모컨) 문장 유지 시간 → '+(v?v+'초':'안 사라짐')});}
+  else if(c==='clear_cards'){hostInput({k:'clear'});SLOG.push({kind:'sys',note:'(웹 리모컨) 벽 문장 모두 지우기'});}}
 /* ================= 폰 우회 수신 (호스트만) =================
    현장 네트워크에서 폰↔PC 직접 연결(PeerJS)이 막히면, 폰은 구글 Apps Script '수신함'으로 소원을 보냄.
    호스트가 2.5초마다 새 소원만 가져와 일반 소원과 똑같이 처리. ?inbox=0 끄기 */
@@ -1433,6 +1441,7 @@ if(IS_HOST&&SHEET_URL&&SQ.get('inbox')!=='0'){
     fetch(SHEET_URL+'?inbox=1&after='+cur,{cache:'no-store'}).then(r=>r.json()).then(d=>{
       if(!d||!d.ok)return;
       for(const it of d.items||[]){if(it.id<=cur)continue;cur=it.id;
+        if(it.skin==='cmd'){ctlCmd(it.text);continue;}   // 운영 리모컨(웹) 명령
         const c={peer:'web-'+String(it.cid||it.id)};
         const bad=SLOG.bad(it.text);
         if(bad)SLOG.reject(c,it.text,bad);else santaWish(it.text,it.skin||'glow',c,it.wall);}

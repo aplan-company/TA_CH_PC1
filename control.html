@@ -20,6 +20,11 @@ button:active{transform:scale(.97)}
 .note{font-size:13px;color:var(--mut);margin-top:8px}
 </style></head><body>
 <h1><span class="dot" id="dot"></span>SANTA 운영 리모컨</h1>
+<div class="card" id="pinCard" style="display:none">
+  <h2>운영 PIN</h2>
+  <div class="row" style="margin-top:0"><input id="pin" type="password" inputmode="numeric" placeholder="PIN 입력"><button id="pinSave" style="padding:12px 18px">저장</button></div>
+  <div class="note">이 폰에 저장돼요. 인터넷(LTE·와이파이)만 되면 어디서든 쓸 수 있고, PC1이 2~5초 안에 적용해요.</div>
+</div>
 
 <div class="card">
   <h2>소원 문장 유지 시간</h2>
@@ -36,7 +41,7 @@ button:active{transform:scale(.97)}
   <div class="note">한 번 누르면 확인 버튼으로 바뀌고, 3초 안에 한 번 더 누르면 실행돼요.</div>
 </div>
 
-<div class="card">
+<div class="card" id="statCard">
   <h2>상태</h2>
   <div class="stat">
     <span>연결</span><b id="sNet">연결 중…</b>
@@ -54,6 +59,12 @@ button:active{transform:scale(.97)}
 const QP=new URLSearchParams(location.search);
 const ROOM=QP.get('room')||'demo';
 const WSURL=QP.get('ws')||('ws://'+location.host);
+/* 두 가지 방식
+   - PC1 주소로 열면(http://<PC1 IP>:8090/control.html): 릴레이에 바로 연결, 현재 상태가 실시간으로 보임
+   - 깃허브 주소로 열면(https://aplan-company.github.io/TA_CH_PC1/control.html): 구글 Apps Script 수신함을 거쳐 전달 (인터넷만 되면 어디서나) */
+const WEB=location.protocol==='https:'||QP.get('mode')==='web';
+const SHEET_URL=QP.get('sheet')||'https://script.google.com/macros/s/AKfycbzBsj_hIpYQ_hEQMlGfLmm2yFmr9jq57h7jbUsQ0h1zI9BKmEpweX4VTKxM7YJC9yYoiQ/exec';
+const LS=(k,v)=>{try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v);}catch(_){return null;}};
 const PRESETS=[[10,'10초'],[20,'20초'],[30,'30초'],[60,'1분'],[120,'2분'],[0,'안 사라짐']];
 const $=id=>document.getElementById(id);
 let ws=null,open=false,st=null,lastT=0;
@@ -61,6 +72,8 @@ const fmt=s=>s===0?'안 사라짐':s>=60&&s%60===0?(s/60)+'분':s+'초';
 const pg=$('presets');
 for(const [v,l] of PRESETS){const b=document.createElement('button');b.textContent=l;b.dataset.v=v;b.onclick=()=>setLife(v);pg.appendChild(b);}
 function render(){
+  if(WEB){$('dot').classList.add('on');const v=LS('ctl-life');$('life').innerHTML=(v===null?'–':fmt(+v))+'<small>'+(v===null?'':'마지막으로 보낸 값')+'</small>';
+    for(const b of pg.children)b.classList.toggle('sel',v!==null&&+b.dataset.v===+v);return;}
   $('dot').classList.toggle('on',open&&Date.now()-lastT<5000);
   $('sNet').textContent=!open?'끊김 · 다시 연결 중':Date.now()-lastT<5000?'정상':'게임 응답 없음';
   if(!st)return;
@@ -78,7 +91,12 @@ function connect(){
     if(m.type==='status'&&m.life!==undefined){st=m;lastT=Date.now();render();}};
   ws.onclose=()=>{open=false;render();setTimeout(connect,2000);};
   ws.onerror=()=>{try{ws.close();}catch(_){}};}
-function cmd(c){if(!open){say('PC1에 연결되지 않았어요',true);return false;}ws.send(JSON.stringify({type:'cmd',cmd:c,room:ROOM}));return true;}
+function cmd(c){
+  if(WEB){const pin=LS('ctl-pin');if(!pin){say('먼저 PIN을 저장해 주세요',true);return false;}
+    fetch(SHEET_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({inbox:{text:'@ctl '+pin+' '+c,skin:'cmd',wall:0,cid:'ctl'}})})
+      .then(()=>say('보냈어요 · PC1이 2~5초 안에 적용해요')).catch(()=>say('보내기 실패 · 인터넷 연결을 확인해 주세요',true));
+    const lm=/^life_(\d+)$/.exec(c);if(lm){LS('ctl-life',lm[1]);render();}return false;}
+  if(!open){say('PC1에 연결되지 않았어요',true);return false;}ws.send(JSON.stringify({type:'cmd',cmd:c,room:ROOM}));return true;}
 function say(t,bad){const m=$('msg');m.textContent=t;m.style.color=bad?'var(--red)':'var(--green)';clearTimeout(say.t);say.t=setTimeout(()=>m.textContent='',4000);}
 function setLife(v){v=Math.max(0,Math.min(3600,Math.round(+v)));if(isNaN(v))return;if(cmd('life_'+v))say('적용 요청: '+fmt(v)+' — 1~2초 뒤 위 숫자가 바뀌면 완료');}
 $('apply').onclick=()=>{const v=$('custom').value;if(v==='')return;setLife(v);$('custom').value='';};
@@ -87,5 +105,7 @@ let armT=0;$('clear').onclick=()=>{const b=$('clear');
   if(Date.now()-armT<3000){armT=0;b.classList.remove('arm');b.textContent='벽 문장 모두 지우기';if(cmd('clear_cards'))say('벽 문장을 지우는 중');return;}
   armT=Date.now();b.classList.add('arm');b.textContent='정말 지울까요? 한 번 더 누르기';
   setTimeout(()=>{if(armT&&Date.now()-armT>=3000){armT=0;b.classList.remove('arm');b.textContent='벽 문장 모두 지우기';}},3100);};
-setInterval(render,1000);connect();
+if(WEB){$('pinCard').style.display='';$('statCard').style.display='none';$('pin').value=LS('ctl-pin')||'';
+  $('pinSave').onclick=()=>{LS('ctl-pin',$('pin').value.trim());say('PIN 저장됨');};render();}
+else{setInterval(render,1000);connect();}
 </script></body></html>
