@@ -11,6 +11,7 @@ if %SIZE% LSS 100000 goto fail
 if exist santa_split.html copy /y santa_split.html santa_split.bak >nul
 move /y santa_split.new santa_split.html >nul
 echo [update] OK (%SIZE% bytes). previous version saved as santa_split.bak
+curl -fsSL -o control.html "https://raw.githubusercontent.com/aplan-company/TA_CH_PC1/main/control.html?t=%RANDOM%"
 echo [update] reloading walls ...
 curl -s -o nul http://localhost:8090/cmd/reload
 echo [update] done.

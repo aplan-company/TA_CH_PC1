@@ -1220,7 +1220,7 @@ for(const k of ['drawElf','stripes','starsDraw','auroraDraw','drawDeer','drawBox
 /* 상태 표시 (화면 구석 작은 배지 — ?hud=0 숨김) */
 const HUD=document.createElement('div');HUD.style.cssText='position:fixed;left:10px;bottom:8px;z-index:30;font:12px ui-monospace,Menlo,monospace;color:#fff3d6;opacity:.55;pointer-events:none;white-space:pre';
 if(SQ.get('hud')!=='0')document.body.appendChild(HUD);
-const OVL=document.createElement('div');OVL.style.cssText='position:fixed;inset:0;z-index:25;display:none;align-items:center;justify-content:center;font:600 28px "Gowun Batang",serif;color:#f5c86a;background:rgba(5,11,28,.55);pointer-events:none';document.body.appendChild(OVL);
+const OVL=document.createElement('div');OVL.style.cssText='position:fixed;inset:0;z-index:25;display:none;align-items:center;justify-content:center;font:600 28px "Gowun Batang",serif;color:#f5c86a;pointer-events:none;text-shadow:0 2px 8px #000';if(SQ.get('hud')!=='0')document.body.appendChild(OVL); /* 화면을 어둡게 덮지 않음 · 현장(hud=0)에서는 안내 글씨도 숨김 */
 /* 자동 세션 갱신 직후 10초는 안내 글씨를 숨김 (관객에게 '기다리는 중' 문구가 안 보이게) */
 let QUIET=0;try{QUIET=+sessionStorage.getItem('santa-quiet')||0;sessionStorage.removeItem('santa-quiet');}catch(_){}
 const overlay=t=>{if(t&&Date.now()-QUIET<10000)t='';OVL.style.display=t?'flex':'none';if(t)OVL.textContent=t;};
@@ -1228,6 +1228,8 @@ const overlay=t=>{if(t&&Date.now()-QUIET<10000)t='';OVL.style.display=t?'flex':'
 function applyEv(e){
   if(e.k==='wish'){const n=queue.length;addWish(e.text,'',e.skin);if(queue.length>n){queue[n].lid=e.n;if(e.wall)queue[n].wall=e.wall;}}
   else if(e.k==='force')forceKind=e.kind;
+  else if(e.k==='life'){LIFE=Math.max(0,+e.v||0);if(IS_HOST){try{localStorage.setItem('santa-life',String(LIFE));}catch(_){}}}
+  else if(e.k==='clear'){for(const c of cards)c.dying=true;}
   else if(e.k==='map')nextMap(e.d);}
 function queueEv(e){
   if(e.n<=lastN)return;                                   // 이미 받은 이벤트
@@ -1235,15 +1237,17 @@ function queueEv(e){
   if(started&&e.s<simStep)return resync('늦게 도착한 이벤트');
   lastN=e.n;(EVQ.get(e.s)||EVQ.set(e.s,[]).get(e.s)).push(e);}
 let resyncing=false;
-function resync(why){if(resyncing)return;resyncing=true;if(why==='새 세션'){try{sessionStorage.setItem('santa-quiet',String(Date.now()));}catch(_){}}console.warn('[santa] 재동기화:',why);overlay('화면 다시 맞추는 중… ('+why+')');
+function resync(why){if(resyncing)return;resyncing=true;if(why!=='새 세션'){try{NET.send({type:'note',screen:SCREEN,why});}catch(_){}}if(why==='새 세션'){try{sessionStorage.setItem('santa-quiet',String(Date.now()));}catch(_){}}console.warn('[santa] 재동기화:',why);overlay('화면 다시 맞추는 중… ('+why+')');
   try{sessionStorage.setItem('santa-resync',String((+sessionStorage.getItem('santa-resync')||0)+1));}catch(_){}
   setTimeout(()=>location.reload(),300);}
 
 let BG_DIRTY=false;
-const LIFE=SQ.has('life')?+SQ.get('life'):30;
+/* 소원 문장 수명(초): 리모컨(control.html)으로 바꾸면 PC1이 기억 · 0 = 안 사라짐 */
+let LIFE=SQ.has('life')?+SQ.get('life'):30;
+if(IS_HOST){try{const v=localStorage.getItem('santa-life');if(v!==null&&v!=='')LIFE=+v;}catch(_){}}
 let FPS=0,DRAWMS=0,_fc=0,_ft=performance.now();
 function stepOnce(draw){const _t0=draw?performance.now():0;
-  if(simStep===0){SRESEED(SESS.seed);if(SESS.carry)applyCarry(SESS.carry);}
+  if(simStep===0){SRESEED(SESS.seed);if(SESS.life!=null)LIFE=+SESS.life;if(SESS.carry)applyCarry(SESS.carry);}
   const evs=EVQ.get(simStep);if(evs){EVQ.delete(simStep);for(const e of evs)applyEv(e);}
   if(simStep%120===0){RS.set(simStep,RSTATE);if(RS.size>40)RS.delete(RS.keys().next().value);checkChk(simStep);}
   /* 소원 문장 수명: 화면에 나타나고 ?life=초 (기본 30) 뒤 2초에 걸쳐 사라짐 · ?life=0 이면 안 사라짐 */
@@ -1272,7 +1276,7 @@ requestAnimationFrame(raf);
 MadNet.steadyTimer(10,()=>{if(performance.now()-lastDraw>400)pump(false);});
 
 /* ---- 호스트: 세션·입력·상태 ---- */
-function newSession(delay){return{id:Math.random().toString(36).slice(2,9),seed:(Math.random()*2**31)|0,t0:clk()+delay};}
+function newSession(delay){return{id:Math.random().toString(36).slice(2,9),seed:(Math.random()*2**31)|0,t0:clk()+delay,life:LIFE};}
 function hostInput(e){if(!IS_HOST||!SESS)return;
   e.s=Math.max(targetCount(),simStep)+D_STEPS;e.n=++evN;EVLOG.push(e);if(EVLOG.length>20000)EVLOG.splice(0,1);/* 아주 긴 세션 보호 */
   lastN=e.n-1;queueEv(e);NET.send({type:'ev',sid:SESS.id,ev:e});}
@@ -1302,7 +1306,7 @@ function applyCarry(cr){
     cards.push({text:c.text,name:'',skin:c.skin||'glow',x:c.x,y:c.y,top:c.top,ty:c.ty,sx:c.sx,th,lines,pos:c.pos,tilt:c.tilt||0,style:'card',born:-(c.age||60000),alpha:1,ph:SRND()*6});}
   count=+cr.count||count;try{document.getElementById('n').textContent=count;}catch(_){}}
 let RENEWING=false;
-function renewSession(why,clear){if(!IS_HOST||RENEWING)return;RENEWING=true;try{sessionStorage.setItem('santa-quiet',String(Date.now()));}catch(_){}console.log('[santa] 세션 갱신:',why);
+function renewSession(why,clear){if(!IS_HOST||RENEWING)return;RENEWING=true;try{sessionStorage.setItem('santa-quiet',String(Date.now()));}catch(_){}console.log('[santa] 세션 갱신:',why);SLOG.push({kind:'sys',note:'세션 갱신: '+why});SLOG.flush();
   const s=newSession(2500);s.carry=makeCarry();if(clear)s.carry.cards=[];try{sessionStorage.setItem('santa-next',JSON.stringify(s));}catch(_){}
   NET.send({type:'session',sess:s,evs:[]});setTimeout(()=>location.reload(),150);}
 function hostReset(){RENEWING=true;const s=newSession(2500);try{sessionStorage.setItem('santa-next',JSON.stringify(s));}catch(_){}
@@ -1333,6 +1337,8 @@ NET.on(m=>{
     if(m.cmd==='reload'){if(IS_HOST)hostReset();else setTimeout(()=>location.reload(),400);return;}
     if(m.cmd==='sound_on'||m.cmd==='sound_off'){if(window.bgmSetActive)window.bgmSetActive(m.cmd==='sound_on');return;}
     if(!IS_HOST)return;
+    {const mm=/^life_(\d+)$/.exec(m.cmd||'');if(mm){hostInput({k:'life',v:Math.min(3600,+mm[1])});SLOG.push({kind:'sys',note:'문장 유지 시간 → '+(+mm[1]?mm[1]+'초':'안 사라짐')});return;}}
+    if(m.cmd==='clear_cards'){hostInput({k:'clear'});SLOG.push({kind:'sys',note:'벽 문장 모두 지우기'});return;}
     if(m.cmd==='reset'||m.cmd==='start')hostReset();
     else if(m.cmd==='demo')hostKey('Y');
     else if(m.cmd==='wish')santaWish(m.text||sample(),m.skin||'glow');
@@ -1343,6 +1349,7 @@ NET.on(m=>{
     if(m.type==='tping')NET.send({type:'tpong',to:m.from,a:m.a,h:clk()});
     else if(m.type==='join'&&SESS)NET.send({type:'session',to:m.from,sess:SESS,evs:EVLOG});
     else if(m.type==='key')hostKey(m.key);
+    else if(m.type==='note')SLOG.push({kind:'sys',note:m.screen+'벽 재동기화: '+m.why});
     return;}
   /* 뷰어 */
   if(m.to&&m.to!==MYID)return;
@@ -1368,7 +1375,7 @@ if(IS_HOST){
       if(!PRE_T)PRE_T=Date.now();
       if(idle||Date.now()-PRE_T>60000){SHOW_DONE=SI.pre;try{localStorage.setItem('santa-showrenew',SI.pre);}catch(_){}renewSession('쇼 시작 전 '+SI.pre,true);}}
     else if(!SI.inWin&&RENEW_MIN>0&&simStep>RENEW_MIN*3600&&idle)renewSession('세션 '+Math.round(simStep/3600)+'분');
-    NET.send({type:'status',state,count,step:simStep,sid:SESS.id,screen:SCREEN});
+    NET.send({type:'status',state,count,step:simStep,sid:SESS.id,screen:SCREEN,life:LIFE,cards:cards.filter(c=>!c.dying).length,age:Math.round(simStep/60)});
     if(state!==lastState){lastState=state;console.log('[santa] status',state);}
     /* 체크섬 방송 */
     const s=Math.floor((simStep-1)/120)*120;if(s>lastChk&&RS.has(s)){lastChk=s;NET.send({type:'chk',sid:SESS.id,s,h:RS.get(s)});}});
